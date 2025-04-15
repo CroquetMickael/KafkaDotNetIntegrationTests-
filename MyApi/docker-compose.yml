@@ -1,0 +1,65 @@
+version: "3.8"
+services:
+  microcks:
+    image: quay.io/microcks/microcks-uber:latest
+    container_name: microcks
+    environment:
+      - ASYNC_MINION_URL=host.docker.internal:8586
+      - KAFKA_BOOTSTRAP_SERVER=kafka:9093
+    ports:
+      - "8585:8080"
+    volumes:
+      - "./config:/deployments/config"
+
+  microcks-async:
+    image: quay.io/microcks/microcks-uber-async-minion:latest
+    environment:
+      - MICROCKS_HOST_PORT=host.docker.internal:8585
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+      - QUARKUS_PROFILE=docker-compose
+    ports:
+      - "8586:8081"
+    depends_on:
+      - microcks
+    volumes:
+      - "./config:/deployments/config"
+
+  mssql-db:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: "<YourStrong@Passw0rd>"
+      MSSQL_DATA_DIR: /var/opt/mssql/data
+      MSSQL_TCP_PORT: 1433
+    ports:
+      - "2024:1433"
+
+  zookeeper:
+    image: wurstmeister/zookeeper
+    container_name: zookeeper
+    ports:
+      - "2181:2181"
+
+  kafka:
+    image: wurstmeister/kafka
+    container_name: kafka
+    ports:
+      - "9092:9092"
+      - "9093:9093"
+    environment:
+      KAFKA_ADVERTISED_LISTENERS: INSIDE://:9092,OUTSIDE://localhost:9093
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INSIDE:PLAINTEXT,OUTSIDE:PLAINTEXT
+      KAFKA_LISTENERS: INSIDE://0.0.0.0:9092,OUTSIDE://0.0.0.0:9093
+      KAFKA_INTER_BROKER_LISTENER_NAME: INSIDE
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_CREATE_TOPICS: "meteo:1:1"
+
+  kafdrop:
+    image: obsidiandynamics/kafdrop
+    restart: "no"
+    ports:
+      - "9000:9000"
+    environment:
+      KAFKA_BROKERCONNECT: "kafka:9092"
+    depends_on:
+      - "kafka"
