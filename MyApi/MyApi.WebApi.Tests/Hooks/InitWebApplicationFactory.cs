@@ -8,6 +8,10 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using BoDi;
 using Respawn;
+using Confluent.Kafka;
+using Moq;
+using MyApi.WebApi.Kafka;
+using Microsoft.Extensions.Hosting;
 
 namespace MyApi.WebApi.Tests.Hooks;
 
@@ -29,6 +33,7 @@ internal class InitWebApplicationFactory
                 {
                     ReplaceLogging(services);
                     ReplaceDatabase(services, objectContainer);
+                    ReplaceKafka(services, scenarioContext);
                 });
             });
 
@@ -50,6 +55,21 @@ internal class InitWebApplicationFactory
         {
             disposableApplication.Dispose();
         }
+    }
+
+    private static void ReplaceKafka(IServiceCollection services, ScenarioContext scenarioContext)
+    {
+        var descriptor = services.FirstOrDefault(d => d.ServiceType == typeof(IHostedService) && d.ImplementationType == typeof(MeteoConsumerBackgroundService));
+        if (descriptor != null)
+        {
+            services.Remove(descriptor);
+        }
+
+        var mockKafkaConsumer = new Mock<IMeteoConsumer>();
+        scenarioContext.TryAdd("kafkaConsumer", mockKafkaConsumer);
+
+        services.AddTransient<IMeteoConsumer, MeteoConsumer>();
+        services.AddTransient<MeteoHandler>();
     }
 
     private static void ReplaceLogging(IServiceCollection services)
