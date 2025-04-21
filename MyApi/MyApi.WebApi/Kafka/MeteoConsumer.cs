@@ -21,12 +21,19 @@ public class MeteoConsumer : IDisposable, IMeteoConsumer
     {
         try
         {
-            var result = _kafkaConsumer.Consume(cancellationToken);
+            var result = _kafkaConsumer?.Consume(cancellationToken);
+            if (result == null || result.Message == null)
+            {
+                Console.WriteLine("Aucun message consommé.");
+                return null;
+            }
+
+            Console.WriteLine($"Message Kafka reçu : {result.Message.Value}");
             return Task.FromResult(result.Message.Value);
         }
         catch (OperationCanceledException)
         {
-            return null; // Gestion de l'annulation
+            throw;
         }
     }
 

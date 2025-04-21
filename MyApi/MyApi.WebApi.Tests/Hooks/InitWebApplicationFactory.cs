@@ -8,10 +8,13 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using BoDi;
 using Respawn;
-using Confluent.Kafka;
 using Moq;
 using MyApi.WebApi.Kafka;
 using Microsoft.Extensions.Hosting;
+using Testcontainers.Kafka;
+using Confluent.Kafka;
+using DotNet.Testcontainers.Builders;
+using Confluent.Kafka.Admin;
 
 namespace MyApi.WebApi.Tests.Hooks;
 
@@ -26,6 +29,25 @@ internal class InitWebApplicationFactory
     {
         await InitializeRespawnAsync();
 
+        var kafkaContainer = new KafkaBuilder()
+         .WithImage("confluentinc/cp-kafka:latest")
+            .WithEnvironment("KAFKA_BROKER_ID", "1")
+            .WithEnvironment("KAFKA_ZOOKEEPER_CONNECT", "localhost:2181")
+            .WithEnvironment("KAFKA_ADVERTISED_LISTENERS", "PLAINTEXT://localhost:9092")
+            .WithEnvironment("KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR", "1")
+            .WithPortBinding(9092, 9092)
+            .WithWaitStrategy(Wait.ForUnixContainer().UntilPortIsAvailable(9092))
+            .Build();
+
+        await kafkaContainer.StartAsync();
+
+        scenarioContext.TryAdd("kafkaContainer", kafkaContainer);
+
+        var bootstrapServers = kafkaContainer.GetBootstrapAddress();
+        scenarioContext["KafkaBootstrapServers"] = bootstrapServers;
+
+        await CreateKafkaTopicAsync(bootstrapServers, "meteo");
+
         var application = new WebApplicationFactory<Program>()
             .WithWebHostBuilder(builder =>
             {
@@ -33,7 +55,7 @@ internal class InitWebApplicationFactory
                 {
                     ReplaceLogging(services);
                     ReplaceDatabase(services, objectContainer);
-                    ReplaceKafka(services, scenarioContext);
+                    ReplaceKafka(services, bootstrapServers, scenarioContext);
                 });
             });
 
@@ -57,7 +79,7 @@ internal class InitWebApplicationFactory
         }
     }
 
-    private static void ReplaceKafka(IServiceCollection services, ScenarioContext scenarioContext)
+    private static void ReplaceKafka(IServiceCollection services, string bootstrapServers, ScenarioContext scenarioContext)
     {
         var descriptor = services.FirstOrDefault(d => d.ServiceType == typeof(IHostedService) && d.ImplementationType == typeof(MeteoConsumerBackgroundService));
         if (descriptor != null)
@@ -65,11 +87,53 @@ internal class InitWebApplicationFactory
             services.Remove(descriptor);
         }
 
-        var mockKafkaConsumer = new Mock<IMeteoConsumer>();
-        scenarioContext.TryAdd("kafkaConsumer", mockKafkaConsumer);
+        // Configuration Kafka
+        services.AddSingleton(provider =>
+        {
+            var config = new ConsumerConfig
+            {
+                BootstrapServers = bootstrapServers,
+                GroupId = "test-group",
+                AutoOffsetReset = AutoOffsetReset.Earliest
+            };
+            return new ConsumerBuilder<string, string>(config).Build();
+        });
 
-        services.AddTransient<IMeteoConsumer, MeteoConsumer>();
-        services.AddTransient<MeteoHandler>();
+        //var mockKafkaConsumer = new Mock<IMeteoConsumer>();
+        var meteoHandler = new Mock<IMeteoHandler>();
+        //scenarioContext.TryAdd("kafkaConsumer", mockKafkaConsumer);
+        scenarioContext.TryAdd("meteoHandler", meteoHandler);
+        services.AddSingleton<IMeteoConsumer, MeteoConsumer>();
+        services.AddSingleton(meteoHandler.Object);
+    }
+
+    private static async Task CreateKafkaTopicAsync(string bootstrapServers, string topicName)
+    {
+        var config = new AdminClientConfig { BootstrapServers = bootstrapServers };
+        using var adminClient = new AdminClientBuilder(config).Build();
+
+        try
+        {
+            await adminClient.CreateTopicsAsync(new[]
+            {
+            new TopicSpecification
+            {
+                Name = topicName,
+                NumPartitions = 1, // Nombre de partitions
+                ReplicationFactor = 1 // Facteur de réplication
+            }
+        });
+            Console.WriteLine($"Topic '{topicName}' créé avec succès.");
+        }
+        catch (CreateTopicsException ex) when (ex.Results[0].Error.Code == ErrorCode.TopicAlreadyExists)
+        {
+            Console.WriteLine($"Le topic '{topicName}' existe déjà.");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Erreur lors de la création du topic '{topicName}': {ex.Message}");
+            throw;
+        }
     }
 
     private static void ReplaceLogging(IServiceCollection services)

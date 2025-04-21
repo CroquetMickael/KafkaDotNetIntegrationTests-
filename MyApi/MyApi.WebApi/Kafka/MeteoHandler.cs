@@ -1,8 +1,6 @@
-﻿using Confluent.Kafka;
+﻿namespace MyApi.WebApi.Kafka;
 
-namespace MyApi.WebApi.Kafka;
-
-public class MeteoHandler
+public class MeteoHandler: IMeteoHandler
 {
     public Task<bool> ExecuteAsync(string message)
     {

@@ -4,6 +4,11 @@ using TechTalk.SpecFlow;
 using Moq;
 using System.Threading.Tasks;
 using MyApi.WebApi.Kafka;
+using Confluent.Kafka;
+using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.Hosting;
+using MyApi.WebApi.Tests.Hooks;
+using Microsoft.Extensions.DependencyInjection;
 
 [Binding]
 internal class WeatherKafkaSteps
@@ -16,30 +21,61 @@ internal class WeatherKafkaSteps
     }
 
     [Given(@"The kafka topic meteo with a message ""(.*)""")]
-    public void GivenTheKafkaTopicMeteoWithAMessage(string p1)
+    public async Task GivenTheKafkaTopicMeteoWithAMessage(string message)
     {
-        var mock = _scenarioContext.Get<Mock<IMeteoConsumer>>("kafkaConsumer");
-        mock
-         .Setup(c => c.ConsumeAsync(It.IsAny<CancellationToken>()))
-         .ReturnsAsync(p1);
+
+
+        _scenarioContext.TryAdd("kafkaMessage", message);
     }
 
     [When("the MeteoConsumerService starts")]
     public async Task WhenTheMeteoConsumerServiceStarts()
     {
-        var mock = _scenarioContext.Get<Mock<IMeteoConsumer>>("kafkaConsumer");
-        var consumerResult = mock.Object.ConsumeAsync(It.IsAny<CancellationToken>());
-        _scenarioContext.TryAdd("result", consumerResult);
+        var application = _scenarioContext.Get<WebApplicationFactory<Program>>(InitWebApplicationFactory.ApplicationKey);
+        var serviceProvider = application.Services;
+
+        var kafkaConsumer = serviceProvider.GetRequiredService<IMeteoConsumer>();
+        var meteoHandler = serviceProvider.GetRequiredService<IMeteoHandler>();
+        var serviceScopeFactory = serviceProvider.GetRequiredService<IServiceScopeFactory>();
+
+        var backgroundService = new MeteoConsumerBackgroundService(kafkaConsumer, meteoHandler, serviceScopeFactory);
+
+        // Démarrer le service manuellement avec un CancellationToken
+        var cancellationTokenSource = new CancellationTokenSource();
+        _scenarioContext.TryAdd("CancellationTokenSource", cancellationTokenSource);
+
+        var task = Task.Run(() => backgroundService.StartAsync(cancellationTokenSource.Token));
+        _scenarioContext.TryAdd("BackgroundServiceTask", task);
+        // Récupérer le bootstrap server depuis le ScenarioContext
+        var bootstrapServers = _scenarioContext["KafkaBootstrapServers"].ToString();
+
+        // Produire un message dans Kafka
+        var producerConfig = new ProducerConfig { BootstrapServers = bootstrapServers };
+        var producer = new ProducerBuilder<Null, string>(producerConfig).Build();
+        var message = _scenarioContext["kafkaMessage"].ToString();
+        var deliveryResult = await producer.ProduceAsync("meteo", new Message<Null, string> { Value = message });
+        await Task.Delay(5000);
+
+        Console.WriteLine($"Message produit : {deliveryResult.Value} sur le topic {deliveryResult.TopicPartition.Topic}");
     }
 
     [Then(@"The message ""(.*)"" should be consumed")]
     public async void ThenTheMessageShouldBeConsumed(string p0)
     {
-        var result = _scenarioContext["result"];
-        var handler = new MeteoHandler();
+        if (_scenarioContext.TryGetValue("CancellationTokenSource", out var tokenSource) && tokenSource is CancellationTokenSource cancellationTokenSource)
+        {
+            cancellationTokenSource.Cancel();
 
-        var handlerResult = await handler.ExecuteAsync(p0);
-        Assert.True(handlerResult);
+            if (_scenarioContext.TryGetValue("BackgroundServiceTask", out var task) && task is Task backgroundServiceTask)
+            {
+                    await backgroundServiceTask; // Attendre que le service s'arrête proprement
+            }
+        }
+
+        var mockHandler = _scenarioContext.Get<Mock<IMeteoHandler>>("meteoHandler");
+        var message = _scenarioContext["kafkaMessage"].ToString() ?? "";
+
+        mockHandler.Verify(h => h.ExecuteAsync(message), Times.AtLeastOnce);
     }
 
 }

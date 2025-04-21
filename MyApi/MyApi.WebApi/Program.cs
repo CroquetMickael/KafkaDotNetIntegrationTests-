@@ -32,7 +32,7 @@ builder.Services.AddSingleton(provider =>
 });
 
 builder.Services.AddTransient<IMeteoConsumer, MeteoConsumer>();
-builder.Services.AddTransient<MeteoHandler>();
+builder.Services.AddTransient<IMeteoHandler, MeteoHandler>();
 builder.Services.AddHostedService<MeteoConsumerBackgroundService>();
 
 var connectionString = builder.Configuration.GetSection("ConnectionStrings")["WeatherContext"];
