@@ -1,0 +1,69 @@
+asyncapi: 3.0.0
+info:
+  title: Meteo Kafka API
+  version: 1.0.0
+  description: |-
+    A sample API to demonstrate features  
+    in the AsyncAPI 3.0 specification and Microcks
+  contact:
+    name: Microcks Team
+    url: "https://microcks.io"
+  license:
+    name: Apache 2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0
+defaultContentType: application/json
+channels:
+  meteoCreated:
+    address: new-meteo-info
+    description: Channel for new meteo information
+    messages:
+      meteoCreated:
+        $ref: "#/components/messages/meteo"
+operations:
+  meteo:
+    action: receive
+    channel:
+      $ref: "#/channels/meteoCreated"
+    messages:
+      - $ref: "#/channels/meteoCreated/messages/meteoCreated"
+components:
+  messages:
+    meteo:
+      payload:
+        $ref: "#/components/schemas/Meteo"
+      contentType: application/json
+      examples:
+        - name: meteoExample
+          payload:
+            id: 1
+            name: "Sample Meteo"
+            temperature: 25.5
+            humidity: 60.0
+            windSpeed: 15.0
+            timestamp: "2023-10-01T12:00:00Z"
+  schemas:
+   Meteo:
+    type: object
+    properties:
+      id:
+        type: integer
+        description: Unique identifier for the meteo information
+      name:
+        type: string
+        description: Name of the meteo information
+        temperature:
+          type: number
+          format: float
+          description: Temperature in Celsius degrees
+        humidity:
+          type: number
+          format: float
+          description: Humidity percentage
+        windSpeed:
+          type: number
+          format: float
+          description: Wind speed in km/h
+      timestamp:
+        type: string
+        format: date-time
+        description: Timestamp of the meteo information in ISO 8601 format

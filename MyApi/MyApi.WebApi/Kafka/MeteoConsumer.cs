@@ -35,6 +35,11 @@ public class MeteoConsumer : IDisposable, IMeteoConsumer
         {
             throw;
         }
+        catch (ConsumeException ex)
+        {
+            Console.WriteLine($"[Kafka] Consume error: {ex.Error.Reason}");
+            return null;
+        }
     }
 
     public void Subscribe(string topic)

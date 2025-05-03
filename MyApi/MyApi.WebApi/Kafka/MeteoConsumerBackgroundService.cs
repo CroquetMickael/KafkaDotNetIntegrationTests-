@@ -6,17 +6,19 @@ public class MeteoConsumerBackgroundService : BackgroundService
     private readonly IMeteoConsumer _kafkaConsumer;
     private readonly IMeteoHandler _meteoHandler;
     private readonly IServiceScopeFactory _providerScopeFactory;
+    private readonly string _topic;
 
-    public MeteoConsumerBackgroundService(IMeteoConsumer kafkaConsumer, IMeteoHandler meteoHandler, IServiceScopeFactory serviceScopeFactory)
+    public MeteoConsumerBackgroundService(IMeteoConsumer kafkaConsumer, IMeteoHandler meteoHandler, IServiceScopeFactory serviceScopeFactory, string topic)
     {
         _kafkaConsumer = kafkaConsumer;
         _meteoHandler = meteoHandler;
         _providerScopeFactory = serviceScopeFactory;
+        _topic = topic;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        _kafkaConsumer.Subscribe("meteo");
+        _kafkaConsumer.Subscribe(_topic);
 
         using var scope = _providerScopeFactory.CreateScope();
         try

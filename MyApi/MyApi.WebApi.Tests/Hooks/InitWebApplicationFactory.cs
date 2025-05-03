@@ -1,20 +1,22 @@
-﻿using Microsoft.AspNetCore.Mvc.Testing;
-using TechTalk.SpecFlow;
+﻿using BoDi;
+using Confluent.Kafka;
+using Confluent.Kafka.Admin;
+using DotNet.Testcontainers.Builders;
+using Microcks.Testcontainers;
+using Microcks.Testcontainers.Connection;
+using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
-using BoDi;
-using Respawn;
 using Moq;
 using MyApi.WebApi.Kafka;
-using Microsoft.Extensions.Hosting;
+using Respawn;
+using TechTalk.SpecFlow;
 using Testcontainers.Kafka;
-using Confluent.Kafka;
-using DotNet.Testcontainers.Builders;
-using Confluent.Kafka.Admin;
 
 namespace MyApi.WebApi.Tests.Hooks;
 
@@ -28,25 +30,8 @@ internal class InitWebApplicationFactory
     public async Task BeforeScenario(ScenarioContext scenarioContext, IObjectContainer objectContainer)
     {
         await InitializeRespawnAsync();
+        await ReplaceKafkaMicrocks(scenarioContext);
 
-        var kafkaContainer = new KafkaBuilder()
-         .WithImage("confluentinc/cp-kafka:latest")
-            .WithEnvironment("KAFKA_BROKER_ID", "1")
-            .WithEnvironment("KAFKA_ZOOKEEPER_CONNECT", "localhost:2181")
-            .WithEnvironment("KAFKA_ADVERTISED_LISTENERS", "PLAINTEXT://localhost:9092")
-            .WithEnvironment("KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR", "1")
-            .WithPortBinding(9092, 9092)
-            .WithWaitStrategy(Wait.ForUnixContainer().UntilPortIsAvailable(9092))
-            .Build();
-
-        await kafkaContainer.StartAsync();
-
-        scenarioContext.TryAdd("kafkaContainer", kafkaContainer);
-
-        var bootstrapServers = kafkaContainer.GetBootstrapAddress();
-        scenarioContext["KafkaBootstrapServers"] = bootstrapServers;
-
-        await CreateKafkaTopicAsync(bootstrapServers, "meteo");
 
         var application = new WebApplicationFactory<Program>()
             .WithWebHostBuilder(builder =>
@@ -55,7 +40,7 @@ internal class InitWebApplicationFactory
                 {
                     ReplaceLogging(services);
                     ReplaceDatabase(services, objectContainer);
-                    ReplaceKafka(services, bootstrapServers, scenarioContext);
+                    ReplaceKafkaTestContainer(services, scenarioContext);
                 });
             });
 
@@ -79,13 +64,30 @@ internal class InitWebApplicationFactory
         }
     }
 
-    private static void ReplaceKafka(IServiceCollection services, string bootstrapServers, ScenarioContext scenarioContext)
+    private static void ReplaceKafka(IServiceCollection services, ScenarioContext scenarioContext)
     {
         var descriptor = services.FirstOrDefault(d => d.ServiceType == typeof(IHostedService) && d.ImplementationType == typeof(MeteoConsumerBackgroundService));
         if (descriptor != null)
         {
             services.Remove(descriptor);
         }
+
+        var mockKafkaConsumer = new Mock<IMeteoConsumer>();
+        scenarioContext.TryAdd("kafkaConsumer", mockKafkaConsumer);
+
+        services.AddTransient<IMeteoConsumer, MeteoConsumer>();
+        services.AddTransient<MeteoHandler>();
+    }
+
+    private static void ReplaceKafkaTestContainer(IServiceCollection services, ScenarioContext scenarioContext)
+    {
+        var descriptor = services.FirstOrDefault(d => d.ServiceType == typeof(IHostedService) && d.ImplementationFactory != null);
+        if (descriptor != null)
+        {
+            services.Remove(descriptor);
+        }
+
+        var bootstrapServers = scenarioContext["KafkaBootstrapServers"].ToString();
 
         // Configuration Kafka
         services.AddSingleton(provider =>
@@ -105,6 +107,42 @@ internal class InitWebApplicationFactory
         scenarioContext.TryAdd("meteoHandler", meteoHandler);
         services.AddSingleton<IMeteoConsumer, MeteoConsumer>();
         services.AddSingleton(meteoHandler.Object);
+    }
+
+    private async static Task ReplaceKafkaMicrocks(ScenarioContext scenarioContext)
+    {
+        var network = new NetworkBuilder().Build();
+
+        await network.CreateAsync();
+        var listener = "test-kafka:19092";
+
+        var kafkaContainer = new KafkaBuilder()
+                .WithImage("confluentinc/cp-kafka:latest")
+                .WithNetwork(network)
+                .WithListener(listener)
+                .WithNetworkAliases("test-kafka")
+                .Build();
+
+        await kafkaContainer.StartAsync();
+        await Task.Delay(5000);
+
+        if (!File.Exists("Mocks\\meteoKafkaAsyncApi.yml"))
+        {
+            throw new FileNotFoundException("L'artefact Microcks 'meteoKafkaAsyncApi.yml' est introuvable.");
+        }
+
+        MicrocksContainerEnsemble ensemble = new MicrocksContainerEnsemble(network, "quay.io/microcks/microcks-uber:1.11.0")
+            .WithMainArtifacts("Mocks\\meteoKafkaAsyncApi.yml")
+            .WithKafkaConnection(new KafkaConnection(listener));
+
+        await ensemble.StartAsync();
+        var topic = ensemble.AsyncMinionContainer.GetKafkaMockTopic("Meteo Kafka API", "1.0.0", "meteo");
+
+        // get bootstrap server
+        var bootstrapServers = kafkaContainer.GetBootstrapAddress();
+
+        scenarioContext.TryAdd("KafkaBootstrapServers", bootstrapServers);
+        scenarioContext.TryAdd("KafkaTopic", topic);
     }
 
     private static async Task CreateKafkaTopicAsync(string bootstrapServers, string topicName)

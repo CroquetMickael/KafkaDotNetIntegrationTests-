@@ -1,5 +1,6 @@
 using Confluent.Kafka;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.OpenApi.Models;
 using MyApi.WebApi;
 using MyApi.WebApi.Kafka;
@@ -33,7 +34,13 @@ builder.Services.AddSingleton(provider =>
 
 builder.Services.AddTransient<IMeteoConsumer, MeteoConsumer>();
 builder.Services.AddTransient<IMeteoHandler, MeteoHandler>();
-builder.Services.AddHostedService<MeteoConsumerBackgroundService>();
+builder.Services.AddHostedService(provider =>
+{
+    var kafkaConsumer = provider.GetRequiredService<IMeteoConsumer>();
+    var serviceScopeFactory = provider.GetRequiredService<IServiceScopeFactory>();
+    var meteoHandler = provider.GetRequiredService<IMeteoHandler>();
+    return new MeteoConsumerBackgroundService(kafkaConsumer, meteoHandler, serviceScopeFactory,"meteo");
+});
 
 var connectionString = builder.Configuration.GetSection("ConnectionStrings")["WeatherContext"];
 

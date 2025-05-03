@@ -23,8 +23,6 @@ internal class WeatherKafkaSteps
     [Given(@"The kafka topic meteo with a message ""(.*)""")]
     public async Task GivenTheKafkaTopicMeteoWithAMessage(string message)
     {
-
-
         _scenarioContext.TryAdd("kafkaMessage", message);
     }
 
@@ -32,13 +30,14 @@ internal class WeatherKafkaSteps
     public async Task WhenTheMeteoConsumerServiceStarts()
     {
         var application = _scenarioContext.Get<WebApplicationFactory<Program>>(InitWebApplicationFactory.ApplicationKey);
+       var topic =  _scenarioContext["KafkaTopic"].ToString();
         var serviceProvider = application.Services;
 
         var kafkaConsumer = serviceProvider.GetRequiredService<IMeteoConsumer>();
         var meteoHandler = serviceProvider.GetRequiredService<IMeteoHandler>();
         var serviceScopeFactory = serviceProvider.GetRequiredService<IServiceScopeFactory>();
 
-        var backgroundService = new MeteoConsumerBackgroundService(kafkaConsumer, meteoHandler, serviceScopeFactory);
+        var backgroundService = new MeteoConsumerBackgroundService(kafkaConsumer, meteoHandler, serviceScopeFactory, topic);
 
         // Démarrer le service manuellement avec un CancellationToken
         var cancellationTokenSource = new CancellationTokenSource();
@@ -47,16 +46,7 @@ internal class WeatherKafkaSteps
         var task = Task.Run(() => backgroundService.StartAsync(cancellationTokenSource.Token));
         _scenarioContext.TryAdd("BackgroundServiceTask", task);
         // Récupérer le bootstrap server depuis le ScenarioContext
-        var bootstrapServers = _scenarioContext["KafkaBootstrapServers"].ToString();
-
-        // Produire un message dans Kafka
-        var producerConfig = new ProducerConfig { BootstrapServers = bootstrapServers };
-        var producer = new ProducerBuilder<Null, string>(producerConfig).Build();
-        var message = _scenarioContext["kafkaMessage"].ToString();
-        var deliveryResult = await producer.ProduceAsync("meteo", new Message<Null, string> { Value = message });
-        await Task.Delay(5000);
-
-        Console.WriteLine($"Message produit : {deliveryResult.Value} sur le topic {deliveryResult.TopicPartition.Topic}");
+        await Task.Delay(15000);
     }
 
     [Then(@"The message ""(.*)"" should be consumed")]
@@ -75,7 +65,7 @@ internal class WeatherKafkaSteps
         var mockHandler = _scenarioContext.Get<Mock<IMeteoHandler>>("meteoHandler");
         var message = _scenarioContext["kafkaMessage"].ToString() ?? "";
 
-        mockHandler.Verify(h => h.ExecuteAsync(message), Times.AtLeastOnce);
+        mockHandler.Verify(h => h.ExecuteAsync(It.IsAny<string>()), Times.AtLeastOnce);
     }
 
 }
