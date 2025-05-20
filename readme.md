@@ -17,3 +17,7 @@ Cette série de modules a pour vocation de fournir un template de test d'intégr
 L'accompagnement sera très présent au début, puis s'atténuera progressivement.
 
 ## Modules
+
+### [Module 1: Intégration d'un service Kafka](./modules/module%201%20intégration%20d'un%20service%20kafka/readme.md)
+
+### [Module 2: Test du service Kafka](./modules/module%202%20Test%20du%20service%20Kafka/readme.md)
