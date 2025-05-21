@@ -1,4 +1,4 @@
-# Implémentation d'un service externe en SOAP et de test d'intégration avec et sans microcks
+# Implémentation d'un service externe en Kafka et de test d'intégration avec et sans microcks
 
 ## Objectifs
 
@@ -21,3 +21,5 @@ L'accompagnement sera très présent au début, puis s'atténuera progressivemen
 ### [Module 1: Intégration d'un service Kafka](./modules/module%201%20intégration%20d'un%20service%20kafka/readme.md)
 
 ### [Module 2: Test du service Kafka](./modules/module%202%20Test%20du%20service%20Kafka/readme.md)
+
+### [Module 3: Test du service Kafka avec TestContainers](./modules/module%203%20Test%20du%20service%20Kafka%20avec%20TestContainers/readme.md)
